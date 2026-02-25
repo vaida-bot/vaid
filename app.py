@@ -1,202 +1,188 @@
-from flask import Flask, render_template_string, request
-import os
+from flask import Flask, request, render_template_string
 from groq import Groq
+import os
+import re
 
 app = Flask(__name__)
+
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-<title>VAID</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VAID - AI Doctor</title>
 <style>
 body {
-    margin:0;
+    margin: 0;
     font-family: 'Segoe UI', sans-serif;
-    background: #111;
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
     color: white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+.container {
+    width: 95%;
+    max-width: 500px;
     text-align: center;
 }
-
-.container {
-    padding: 40px;
+h1 {
+    font-size: 32px;
+    margin-bottom: 20px;
 }
-
 button {
-    padding: 15px 25px;
-    margin: 10px;
+    width: 100%;
+    padding: 15px;
+    margin: 10px 0;
     font-size: 18px;
-    border-radius: 10px;
     border: none;
+    border-radius: 10px;
     cursor: pointer;
 }
-
-.lang-btn {
-    background: white;
+.primary {
+    background: #00c6ff;
     color: black;
-    width: 200px;
 }
-
-.symptom-btn {
-    background: #222;
+.secondary {
+    background: #ffffff22;
     color: white;
 }
-
-.symptom-btn.active {
-    background: #00bfff;
+input, select {
+    width: 100%;
+    padding: 12px;
+    margin: 8px 0;
+    border-radius: 8px;
+    border: none;
+    font-size: 16px;
 }
-
-.submit-btn {
-    background: white;
-    color: black;
+.result-box {
     margin-top: 20px;
+    padding: 20px;
+    border-radius: 12px;
+    background: #ffffff11;
+    font-size: 18px;
+    text-align: left;
 }
-
-#cameraBox {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-}
-
-video {
-    width: 200px;
-    border-radius: 10px;
-}
+.risk-low { color: #00ff88; font-weight: bold; }
+.risk-medium { color: #ffd000; font-weight: bold; }
+.risk-high { color: #ff4c4c; font-weight: bold; }
 </style>
 </head>
 <body>
+<div class="container">
+<h1>VAID AI Doctor</h1>
 
-<div class="container" id="langScreen">
-    <h1>VAID</h1>
-    <button class="lang-btn" onclick="setLang('en')">English</button>
-    <button class="lang-btn" onclick="setLang('hi')">हिंदी</button>
+{% if not language %}
+<form method="POST">
+    <button name="language" value="english" class="primary">English</button>
+    <button name="language" value="hindi" class="secondary">हिन्दी</button>
+</form>
+
+{% elif not result %}
+
+<form method="POST">
+<input type="hidden" name="language" value="{{language}}">
+
+<select name="symptom" required>
+<option value="">Select Primary Symptom</option>
+<option>Cough</option>
+<option>Fever</option>
+<option>Headache</option>
+<option>Chest Pain</option>
+<option>Stomach Pain</option>
+</select>
+
+<input type="number" name="height" placeholder="Height (cm)" required>
+<input type="number" name="weight" placeholder="Weight (kg)" required>
+
+<button type="submit" class="primary">Analyze</button>
+</form>
+
+{% else %}
+
+<div class="result-box">
+<p><strong>Condition:</strong> {{condition}}</p>
+<p><strong>Risk:</strong>
+<span class="
+{% if risk == 'Low' %}risk-low
+{% elif risk == 'Medium' %}risk-medium
+{% else %}risk-high
+{% endif %}
+">{{risk}}</span>
+</p>
+<p><strong>Action:</strong> {{action}}</p>
 </div>
 
-<div class="container" id="mainScreen" style="display:none;">
-    <h2 id="questionText"></h2>
+<form method="GET">
+<button class="secondary">Start Over</button>
+</form>
 
-    <div id="symptoms"></div>
+{% endif %}
 
-    <div style="margin-top:20px;">
-        <input placeholder="Height (cm)" id="height">
-        <input placeholder="Weight (kg)" id="weight">
-    </div>
-
-    <button class="submit-btn" onclick="submitData()">Analyze</button>
-
-    <div id="result" style="margin-top:30px;"></div>
 </div>
-
-<div id="cameraBox">
-    <button onclick="toggleCamera()">📷</button>
-    <video id="video" autoplay style="display:none;"></video>
-</div>
-
-<script>
-let language = "en";
-let selected = [];
-
-function setLang(lang) {
-    language = lang;
-    document.getElementById("langScreen").style.display = "none";
-    document.getElementById("mainScreen").style.display = "block";
-
-    const question = lang === "en"
-        ? "Select your symptoms:"
-        : "अपने लक्षण चुनें:";
-
-    document.getElementById("questionText").innerText = question;
-
-    const symptoms = lang === "en"
-        ? ["Fever","Cough","Headache","Chest Pain","Breathing Issue","Fatigue"]
-        : ["बुखार","खांसी","सिरदर्द","सीने में दर्द","सांस लेने में दिक्कत","कमजोरी"];
-
-    const container = document.getElementById("symptoms");
-    container.innerHTML = "";
-
-    symptoms.forEach(s => {
-        let btn = document.createElement("button");
-        btn.innerText = s;
-        btn.className = "symptom-btn";
-        btn.onclick = () => toggleSymptom(btn);
-        container.appendChild(btn);
-    });
-}
-
-function toggleSymptom(btn) {
-    btn.classList.toggle("active");
-    const text = btn.innerText;
-    if (selected.includes(text)) {
-        selected = selected.filter(x => x !== text);
-    } else {
-        selected.push(text);
-    }
-}
-
-function submitData() {
-    fetch("/", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({
-            symptoms: selected.join(", "),
-            height: document.getElementById("height").value,
-            weight: document.getElementById("weight").value
-        })
-    })
-    .then(res => res.json())
-    .then(data => {
-        document.getElementById("result").innerText = data.result;
-    });
-}
-
-function toggleCamera() {
-    const video = document.getElementById("video");
-    if (video.style.display === "none") {
-        navigator.mediaDevices.getUserMedia({video:true})
-        .then(stream => {
-            video.srcObject = stream;
-            video.style.display = "block";
-        });
-    } else {
-        video.srcObject.getTracks().forEach(track => track.stop());
-        video.style.display = "none";
-    }
-}
-</script>
-
 </body>
 </html>
 """
 
-@app.route("/", methods=["GET","POST"])
+@app.route("/", methods=["GET", "POST"])
 def home():
+    language = None
+    result = None
+    condition = ""
+    risk = ""
+    action = ""
+
     if request.method == "POST":
-        data = request.get_json()
-        symptoms = data.get("symptoms")
-        height = data.get("height")
-        weight = data.get("weight")
+        language = request.form.get("language")
 
-        prompt = f"""
-        Symptoms: {symptoms}
-        Height: {height}
-        Weight: {weight}
+        symptom = request.form.get("symptom")
+        height = request.form.get("height")
+        weight = request.form.get("weight")
 
-        Provide:
-        - Possible cause
-        - Risk level (Low/Medium/High)
-        - What to do next
-        Keep it short and clinical.
-        """
+        if symptom and height and weight:
+            bmi = round(float(weight) / ((float(height)/100) ** 2), 1)
 
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role":"user","content":prompt}]
-        )
+            prompt = f"""
+You are a medical triage AI.
 
-        return {"result": response.choices[0].message.content}
+Symptom: {symptom}
+BMI: {bmi}
 
-    return render_template_string(HTML)
+Respond strictly in this format:
+
+CONDITION: ...
+RISK: Low / Medium / High
+ACTION: ...
+"""
+
+            response = client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            text = response.choices[0].message.content
+
+            condition_match = re.search(r"CONDITION:\s*(.*)", text)
+            risk_match = re.search(r"RISK:\s*(.*)", text)
+            action_match = re.search(r"ACTION:\s*(.*)", text)
+
+            condition = condition_match.group(1) if condition_match else "Unknown"
+            risk = risk_match.group(1) if risk_match else "Medium"
+            action = action_match.group(1) if action_match else "Consult doctor."
+
+            result = True
+
+    return render_template_string(
+        HTML,
+        language=language,
+        result=result,
+        condition=condition,
+        risk=risk,
+        action=action
+    )
 
 if __name__ == "__main__":
     app.run()
