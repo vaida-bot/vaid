@@ -3,7 +3,6 @@ import os
 from groq import Groq
 
 app = Flask(__name__)
-
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 HTML = """
@@ -13,64 +12,156 @@ HTML = """
 <title>VAID</title>
 <style>
 body {
-    font-family: Arial, sans-serif;
+    margin:0;
+    font-family: 'Segoe UI', sans-serif;
+    background: #111;
+    color: white;
     text-align: center;
-    background: #f5f5f5;
+}
+
+.container {
     padding: 40px;
 }
+
 button {
     padding: 15px 25px;
     margin: 10px;
-    font-size: 16px;
-    border-radius: 8px;
+    font-size: 18px;
+    border-radius: 10px;
     border: none;
     cursor: pointer;
 }
-.symptom { background: #ffffff; }
-.submit { background: #222; color: white; }
+
+.lang-btn {
+    background: white;
+    color: black;
+    width: 200px;
+}
+
+.symptom-btn {
+    background: #222;
+    color: white;
+}
+
+.symptom-btn.active {
+    background: #00bfff;
+}
+
+.submit-btn {
+    background: white;
+    color: black;
+    margin-top: 20px;
+}
+
+#cameraBox {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+}
+
+video {
+    width: 200px;
+    border-radius: 10px;
+}
 </style>
 </head>
 <body>
 
-<h2>VAID - AI Medical Triage</h2>
+<div class="container" id="langScreen">
+    <h1>VAID</h1>
+    <button class="lang-btn" onclick="setLang('en')">English</button>
+    <button class="lang-btn" onclick="setLang('hi')">हिंदी</button>
+</div>
 
-<form method="POST">
-<h3>Select Symptoms</h3>
+<div class="container" id="mainScreen" style="display:none;">
+    <h2 id="questionText"></h2>
 
-<button class="symptom" type="button" onclick="toggle(this)">Fever</button>
-<button class="symptom" type="button" onclick="toggle(this)">Cough</button>
-<button class="symptom" type="button" onclick="toggle(this)">Headache</button>
-<button class="symptom" type="button" onclick="toggle(this)">Chest Pain</button>
-<button class="symptom" type="button" onclick="toggle(this)">Breathing Issue</button>
-<button class="symptom" type="button" onclick="toggle(this)">Fatigue</button>
+    <div id="symptoms"></div>
 
-<input type="hidden" name="symptoms" id="symptoms">
+    <div style="margin-top:20px;">
+        <input placeholder="Height (cm)" id="height">
+        <input placeholder="Weight (kg)" id="weight">
+    </div>
 
-<h3>Optional Body Metrics</h3>
-Height (cm): <input name="height"><br><br>
-Weight (kg): <input name="weight"><br><br>
+    <button class="submit-btn" onclick="submitData()">Analyze</button>
 
-<button class="submit" type="submit">Analyze</button>
-</form>
+    <div id="result" style="margin-top:30px;"></div>
+</div>
 
-{% if result %}
-<h3>AI Assessment</h3>
-<p>{{ result }}</p>
-{% endif %}
+<div id="cameraBox">
+    <button onclick="toggleCamera()">📷</button>
+    <video id="video" autoplay style="display:none;"></video>
+</div>
 
 <script>
+let language = "en";
 let selected = [];
 
-function toggle(btn) {
+function setLang(lang) {
+    language = lang;
+    document.getElementById("langScreen").style.display = "none";
+    document.getElementById("mainScreen").style.display = "block";
+
+    const question = lang === "en"
+        ? "Select your symptoms:"
+        : "अपने लक्षण चुनें:";
+
+    document.getElementById("questionText").innerText = question;
+
+    const symptoms = lang === "en"
+        ? ["Fever","Cough","Headache","Chest Pain","Breathing Issue","Fatigue"]
+        : ["बुखार","खांसी","सिरदर्द","सीने में दर्द","सांस लेने में दिक्कत","कमजोरी"];
+
+    const container = document.getElementById("symptoms");
+    container.innerHTML = "";
+
+    symptoms.forEach(s => {
+        let btn = document.createElement("button");
+        btn.innerText = s;
+        btn.className = "symptom-btn";
+        btn.onclick = () => toggleSymptom(btn);
+        container.appendChild(btn);
+    });
+}
+
+function toggleSymptom(btn) {
+    btn.classList.toggle("active");
     const text = btn.innerText;
     if (selected.includes(text)) {
         selected = selected.filter(x => x !== text);
-        btn.style.background = "#ffffff";
     } else {
         selected.push(text);
-        btn.style.background = "#add8e6";
     }
-    document.getElementById("symptoms").value = selected.join(", ");
+}
+
+function submitData() {
+    fetch("/", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+            symptoms: selected.join(", "),
+            height: document.getElementById("height").value,
+            weight: document.getElementById("weight").value
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById("result").innerText = data.result;
+    });
+}
+
+function toggleCamera() {
+    const video = document.getElementById("video");
+    if (video.style.display === "none") {
+        navigator.mediaDevices.getUserMedia({video:true})
+        .then(stream => {
+            video.srcObject = stream;
+            video.style.display = "block";
+        });
+    } else {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.style.display = "none";
+    }
 }
 </script>
 
@@ -78,34 +169,34 @@ function toggle(btn) {
 </html>
 """
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET","POST"])
 def home():
-    result = None
     if request.method == "POST":
-        symptoms = request.form.get("symptoms")
-        height = request.form.get("height")
-        weight = request.form.get("weight")
+        data = request.get_json()
+        symptoms = data.get("symptoms")
+        height = data.get("height")
+        weight = data.get("weight")
 
         prompt = f"""
         Symptoms: {symptoms}
-        Height: {height} cm
-        Weight: {weight} kg
+        Height: {height}
+        Weight: {weight}
 
         Provide:
-        1. Possible condition
-        2. Risk level (Low/Medium/High)
-        3. What to do next
-        Keep it concise.
+        - Possible cause
+        - Risk level (Low/Medium/High)
+        - What to do next
+        Keep it short and clinical.
         """
 
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role":"user","content":prompt}]
         )
 
-        result = response.choices[0].message.content
+        return {"result": response.choices[0].message.content}
 
-    return render_template_string(HTML, result=result)
+    return render_template_string(HTML)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run()
